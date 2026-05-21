@@ -17,6 +17,32 @@ const supabase = createClient(
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// In-memory rate limit store: ip -> array of request timestamps
+const rateLimitStore = new Map();
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const HOUR_LIMIT = 10;
+const DAY_LIMIT = 50;
+
+function getIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  return (forwarded ? forwarded.split(",")[0] : req.socket.remoteAddress).trim();
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const timestamps = (rateLimitStore.get(ip) || []).filter((t) => t > now - DAY_MS);
+  const hourCount = timestamps.filter((t) => t > now - HOUR_MS).length;
+  const dayCount = timestamps.length;
+
+  if (hourCount >= HOUR_LIMIT) return { allowed: false, window: "hour" };
+  if (dayCount >= DAY_LIMIT) return { allowed: false, window: "day" };
+
+  timestamps.push(now);
+  rateLimitStore.set(ip, timestamps);
+  return { allowed: true };
+}
+
 async function getEmbeddingAndCandidates(query, limit = 20) {
   const embeddingRes = await openai.embeddings.create({
     model: "text-embedding-3-small",
@@ -49,6 +75,14 @@ app.get("/search", async (req, res) => {
 app.get("/best-match", async (req, res) => {
   const query = req.query.q?.trim();
   if (!query) return res.status(400).json({ error: "q is required" });
+
+  const limit = checkRateLimit(getIp(req));
+  if (!limit.allowed) {
+    const msg = limit.window === "hour"
+      ? "You've used your AI searches for this hour — try again soon or use the regular search above."
+      : "You've used your AI searches for today — try again tomorrow or use the regular search above.";
+    return res.status(429).json({ error: msg });
+  }
 
   try {
     const candidates = await getEmbeddingAndCandidates(query, 20);
