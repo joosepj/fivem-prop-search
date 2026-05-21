@@ -146,7 +146,7 @@ export default function App() {
 
           <div style={styles.section}>
             <div style={styles.aiHeader}>
-              <span style={styles.aiLabel}>✦ Ask Claude</span>
+              <span style={styles.aiLabel}>✦ AI Best Match</span>
               <span style={styles.aiSubLabel}>Describes the single best prop for your use case</span>
             </div>
             <input
@@ -177,7 +177,7 @@ export default function App() {
             </div>
           )}
 
-          {describeLoading && <p style={styles.status}>Asking Claude…</p>}
+          {describeLoading && <p style={styles.status}>Finding best match…</p>}
           {describeError && <p style={{ ...styles.status, color: "#fc8181" }}>{describeError}</p>}
           {!describeLoading && !describeError && describeQuery.trim() && !best && (
             <p style={styles.status}>No result.</p>
