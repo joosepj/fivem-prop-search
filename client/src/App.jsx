@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
 const DEBOUNCE_MS = 400;
+const API = import.meta.env.VITE_API_URL ?? "";
 
 function getPrefix(name) {
   const m = name.match(/^([a-z]+_)/i);
@@ -51,8 +52,8 @@ export default function App() {
       try {
         const endpoint =
           mode === "best-match"
-            ? `/best-match?q=${encodeURIComponent(query)}`
-            : `/search?q=${encodeURIComponent(query)}&limit=30`;
+            ? `${API}/best-match?q=${encodeURIComponent(query)}`
+            : `${API}/search?q=${encodeURIComponent(query)}&limit=30`;
 
         const res = await fetch(endpoint);
         const data = await res.json();

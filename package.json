@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "node server/index.js",
     "ingest": "node scripts/ingest-props.js",
     "server": "node server/index.js"
   },
