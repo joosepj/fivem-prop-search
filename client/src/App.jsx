@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 
 const DEBOUNCE_MS = 400;
 const API = import.meta.env.VITE_API_URL ?? "";
+const R2  = "https://pub-c1d30e6aba3a4fca841cd417ecbe67e0.r2.dev";
 
 function getPrefix(name) {
   const m = name.match(/^([a-z]+_)/i);
@@ -51,20 +52,64 @@ function StarButton({ name, favorites, onToggle }) {
   );
 }
 
+function PropImage({ name }) {
+  const [view, setView]     = useState("overview");
+  const [status, setStatus] = useState("loading"); // "loading" | "loaded" | "error"
+
+  const src = `${R2}/${name}_${view}.png`;
+
+  // Reset on prop change
+  useEffect(() => { setView("overview"); setStatus("loading"); }, [name]);
+
+  function toggle() {
+    setView((v) => (v === "overview" ? "player" : "overview"));
+    setStatus("loading");
+  }
+
+  // Overview failed/timed-out → hide the entire image section, no broken icon
+  if (status === "error" && view === "overview") return null;
+
+  return (
+    <div style={imgStyles.wrapper}>
+      {/* opacity instead of display:none so the browser actually fetches the image */}
+      <img
+        key={src}
+        src={src}
+        alt=""
+        style={{ ...imgStyles.img, opacity: status === "loaded" ? 1 : 0 }}
+        onLoad={() => setStatus("loaded")}
+        onError={() => setStatus("error")}
+      />
+      {status === "loading" && <div style={imgStyles.skeleton} />}
+      {status === "error" && view === "player" && (
+        <div style={imgStyles.noPlayer}>No player view available</div>
+      )}
+      {(status === "loaded" || (status === "error" && view === "player")) && (
+        <button style={imgStyles.toggle} onClick={toggle}>
+          {view === "overview" ? "Player view" : "Overview"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PropItem({ name, favorites, onToggle, onCopy }) {
   const hash = useMemo(() => joaatHash(name), [name]);
   return (
     <li style={styles.item}>
-      <div style={styles.itemLeft}>
-        <StarButton name={name} favorites={favorites} onToggle={onToggle} />
-        <div style={styles.itemInfo}>
-          <span style={styles.name}>{name}</span>
-          <span style={styles.hash}>{hash}</span>
+      <PropImage name={name} />
+      <div style={styles.itemRow}>
+        <div style={styles.itemLeft}>
+          <StarButton name={name} favorites={favorites} onToggle={onToggle} />
+          <div style={styles.itemInfo}>
+            <span style={styles.name}>{name}</span>
+            <span style={styles.hash}>{hash}</span>
+          </div>
         </div>
-      </div>
-      <div style={styles.itemRight}>
-        <CopyButton text={name} label="Copy" onCopy={() => onCopy(name)} />
-        <CopyButton text={hash} label="Copy Hash" onCopy={() => onCopy(name)} />
+        <div style={styles.itemRight}>
+          <CopyButton text={name} label="Copy" onCopy={() => onCopy(name)} />
+          <CopyButton text={hash} label="Copy Hash" onCopy={() => onCopy(name)} />
+        </div>
       </div>
     </li>
   );
@@ -284,6 +329,10 @@ export default function App() {
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 4px; }
+        @keyframes shimmer {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
       `}</style>
 
       <div style={styles.layout}>
@@ -356,6 +405,7 @@ export default function App() {
                     <CopyButton text={joaatHash(best.name)} label="Copy Hash" onCopy={() => trackCopy(best.name)} />
                   </div>
                 </div>
+                <PropImage name={best.name} />
                 <div style={styles.bestReason}>{best.reason}</div>
               </div>
             )}
@@ -468,9 +518,13 @@ const styles = {
   filterCount: { opacity: 0.6, marginLeft: "3px" },
   list: { listStyle: "none", display: "flex", flexDirection: "column", gap: "8px" },
   item: {
+    display: "flex", flexDirection: "column",
+    background: "#1a1d27", border: "1px solid #2d3748",
+    borderRadius: "8px", overflow: "hidden",
+  },
+  itemRow: {
     display: "flex", justifyContent: "space-between", alignItems: "center",
-    padding: "12px 16px", background: "#1a1d27", border: "1px solid #2d3748",
-    borderRadius: "8px", gap: "8px",
+    padding: "12px 16px", gap: "8px",
   },
   itemLeft: { display: "flex", alignItems: "center", gap: "10px", minWidth: 0 },
   itemInfo: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
@@ -491,7 +545,7 @@ const styles = {
   bestLabel: { fontSize: "0.75rem", fontWeight: 700, color: "#90cdf4", textTransform: "uppercase", letterSpacing: "0.08em" },
   bestNameRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "8px", gap: "8px" },
   bestName: { fontFamily: "monospace", fontSize: "1.1rem", color: "#e2e8f0" },
-  bestReason: { fontSize: "0.875rem", color: "#a0aec0", lineHeight: 1.5 },
+  bestReason: { fontSize: "0.875rem", color: "#a0aec0", lineHeight: 1.5, marginTop: "10px" },
 
   // Sidebar
   sidebar: {
@@ -538,4 +592,49 @@ const styles = {
     cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0 2px", flexShrink: 0,
   },
   sidebarMore: { fontSize: "0.7rem", color: "#4a5568", textAlign: "center" },
+};
+
+const imgStyles = {
+  wrapper: {
+    position: "relative",
+    height: "160px",
+    background: "#0d1117",
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+  img: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
+  skeleton: {
+    position: "absolute",
+    inset: 0,
+    background: "linear-gradient(90deg, #1a1d27 25%, #22263a 50%, #1a1d27 75%)",
+    backgroundSize: "200% 100%",
+    animation: "shimmer 1.4s ease-in-out infinite",
+  },
+  noPlayer: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#4a5568",
+    fontSize: "0.78rem",
+  },
+  toggle: {
+    position: "absolute",
+    bottom: "7px",
+    right: "8px",
+    fontSize: "0.68rem",
+    fontWeight: 600,
+    padding: "3px 9px",
+    borderRadius: "999px",
+    border: "1px solid #4a5568",
+    background: "rgba(13, 17, 23, 0.82)",
+    color: "#a0aec0",
+    cursor: "pointer",
+    backdropFilter: "blur(4px)",
+  },
 };
