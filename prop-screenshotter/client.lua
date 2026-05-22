@@ -85,11 +85,27 @@ function CaptureAndUpload(propName)
     end
 
     local minDim, maxDim = GetModelDimensions(model)
-    local sX      = maxDim.x - minDim.x
-    local sY      = maxDim.y - minDim.y
-    local sZ      = maxDim.z - minDim.z
+    local sX = maxDim.x - minDim.x
+    local sY = maxDim.y - minDim.y
+    local sZ = maxDim.z - minDim.z
+
+    -- Prop shape classification
+    local xyMax    = math.max(sX, sY)
+    local isFlat   = sZ < 0.3
+    local isTall   = sZ > xyMax * 3.0
+
+    -- FOV: wider for small props so they fill the frame
     local maxSide = math.max(sX, sY, sZ)
-    local dist    = math.max(maxSide * 2.0, 1.5)
+    local FOV = math.min(65.0, math.max(55.0, 55.0 + (1.0 - maxSide) * 8.0))
+    local tanHalfFov = math.tan(math.rad(FOV * 0.5))
+
+    -- Minimum camera distance to fill frame for a span of size s (with padding)
+    local function fitDist(s, pad)
+        return (s * 0.5 * (pad or 1.3)) / tanHalfFov
+    end
+
+    -- XY diagonal: covers the footprint from any horizontal angle
+    local sXY = math.sqrt(sX * sX + sY * sY)
 
     local ped     = PlayerPedId()
     local pos     = GetEntityCoords(ped)
@@ -98,13 +114,15 @@ function CaptureAndUpload(propName)
     local fwdX    = math.sin(rad)
     local fwdY    = math.cos(rad)
 
+    local spawnOff = math.max(maxSide * 2.0, 1.5) + 5.0
     local prop = CreateObject(model,
-        pos.x + fwdX * (dist + 5.0),
-        pos.y + fwdY * (dist + 5.0),
+        pos.x + fwdX * spawnOff,
+        pos.y + fwdY * spawnOff,
         pos.z, false, false, false)
     PlaceObjectOnGroundProperly(prop)
     FreezeEntityPosition(prop, true)
-    Wait(350)
+    -- Extra settle time: thin/tall props can sway after PlaceOnGround
+    Wait(isTall and 700 or 500)
 
     local pCoords = GetEntityCoords(prop)
     local center  = vector3(pCoords.x, pCoords.y, pCoords.z + sZ * 0.5)
@@ -117,14 +135,32 @@ function CaptureAndUpload(propName)
     SetWeatherTypeNow('EXTRASUNNY')
 
     -- ── Overview: 3/4 angle from above ───────────────────────────────────────
-    local oDist = math.max(dist * 1.4, 2.0)
-    local cam1  = CreateCam('DEFAULT_SCRIPTED_CAMERA', true)
+    -- Camera XY offset coefficients: approach at 45° (equal X and Y)
+    local horizCoeff = math.sqrt(0.65 * 0.65 + 0.65 * 0.65)  -- ≈ 0.919
+
+    local elevCoeff
+    if isFlat then
+        elevCoeff = 0.35   -- near top-down so surface texture is visible
+    elseif isTall then
+        elevCoeff = 0.45   -- shallower angle captures full height better
+    else
+        elevCoeff = 0.85
+    end
+
+    local totalCoeff = math.sqrt(0.65 * 0.65 + 0.65 * 0.65 + elevCoeff * elevCoeff)
+
+    -- Choose oDist so that both the XY footprint and the height fit in frame
+    local dForXY = fitDist(isTall and xyMax or sXY) / horizCoeff
+    local dForZ  = fitDist(sZ) / totalCoeff
+    local oDist  = math.max(dForXY, dForZ, 1.5)
+
+    local cam1 = CreateCam('DEFAULT_SCRIPTED_CAMERA', true)
     SetCamCoord(cam1,
         center.x - oDist * 0.65,
         center.y - oDist * 0.65,
-        center.z + oDist * 0.85)
+        center.z + oDist * elevCoeff)
     PointCamAtCoord(cam1, center.x, center.y, center.z)
-    SetCamFov(cam1, 50.0)
+    SetCamFov(cam1, FOV)
     SetCamActive(cam1, true)
     RenderScriptCams(true, false, 0, true, false)
     Wait(700)
@@ -135,13 +171,17 @@ function CaptureAndUpload(propName)
     SetCamActive(cam1, false)
     DestroyCam(cam1, false)
 
+    -- Fit whichever is larger: horizontal footprint or vertical span
+    local eyeH  = pCoords.z + 1.65
+    local dEye  = math.max(fitDist(math.max(sXY, sZ)), 1.5)
+
     local cam2 = CreateCam('DEFAULT_SCRIPTED_CAMERA', true)
     SetCamCoord(cam2,
-        pCoords.x - fwdX * dist,
-        pCoords.y - fwdY * dist,
-        pCoords.z + 1.65)
+        pCoords.x - fwdX * dEye,
+        pCoords.y - fwdY * dEye,
+        eyeH)
     PointCamAtCoord(cam2, center.x, center.y, center.z)
-    SetCamFov(cam2, 50.0)
+    SetCamFov(cam2, FOV)
     SetCamActive(cam2, true)
     RenderScriptCams(true, false, 0, true, false)
     Wait(400)
