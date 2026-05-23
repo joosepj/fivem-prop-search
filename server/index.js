@@ -1,4 +1,6 @@
 import "dotenv/config";
+import crypto from "crypto";
+import https from "https";
 import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
@@ -139,6 +141,134 @@ app.get("/best-match", async (req, res) => {
     });
 
     res.json({ top, results: candidates });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── R2 helpers ────────────────────────────────────────────────────────────────
+
+const R2_HOST   = `${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+const R2_BUCKET = process.env.R2_BUCKET || "gta-prop-images";
+const R2_KEY    = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET = process.env.R2_SECRET_ACCESS_KEY;
+
+function sha256Hex(data) {
+  return crypto.createHash("sha256").update(data).digest("hex");
+}
+function hmacSha256(key, data) {
+  return crypto.createHmac("sha256", key).update(data).digest();
+}
+
+function deleteFromR2(objectKey) {
+  return new Promise((resolve, reject) => {
+    const now       = new Date();
+    const amzDate   = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+    const dateStamp = amzDate.slice(0, 8);
+    const emptyHash = sha256Hex("");
+    const uri       = `/${R2_BUCKET}/${objectKey}`;
+
+    const canonHeaders = `host:${R2_HOST}\nx-amz-content-sha256:${emptyHash}\nx-amz-date:${amzDate}\n`;
+    const signedHdrs   = "host;x-amz-content-sha256;x-amz-date";
+    const canonReq     = `DELETE\n${uri}\n\n${canonHeaders}\n${signedHdrs}\n${emptyHash}`;
+    const scope        = `${dateStamp}/auto/s3/aws4_request`;
+    const sts          = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256Hex(canonReq)}`;
+
+    const kDate    = hmacSha256(`AWS4${R2_SECRET}`, dateStamp);
+    const kRegion  = hmacSha256(kDate,    "auto");
+    const kService = hmacSha256(kRegion,  "s3");
+    const kSign    = hmacSha256(kService, "aws4_request");
+    const sig      = hmacSha256(kSign, sts).toString("hex");
+    const auth     = `AWS4-HMAC-SHA256 Credential=${R2_KEY}/${scope}, SignedHeaders=${signedHdrs}, Signature=${sig}`;
+
+    const req = https.request({
+      hostname: R2_HOST,
+      path    : uri,
+      method  : "DELETE",
+      headers : { "x-amz-content-sha256": emptyHash, "x-amz-date": amzDate, Authorization: auth, Host: R2_HOST },
+    }, (res) => {
+      res.resume();
+      res.on("end", () => {
+        // 204 = deleted, 404 = already gone — both are fine
+        if (res.statusCode < 300 || res.statusCode === 404) resolve();
+        else reject(new Error(`R2 DELETE ${objectKey}: HTTP ${res.statusCode}`));
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+// ── Review endpoints ──────────────────────────────────────────────────────────
+
+app.get("/review/next", async (req, res) => {
+  const includeSkipped = req.query.skipped === "1";
+  try {
+    let query = supabase.from("props").select("id, name").order("id").limit(1);
+    if (includeSkipped) {
+      query = query.eq("review_status", "skipped");
+    } else {
+      query = query.is("review_status", null);
+    }
+    const { data, error } = await query.maybeSingle();
+    if (error) throw new Error(error.message);
+
+    if (!data) return res.json({ done: true });
+
+    // Progress counts
+    const [{ count: total }, { count: reviewed }] = await Promise.all([
+      supabase.from("props").select("*", { count: "exact", head: true }),
+      supabase.from("props").select("*", { count: "exact", head: true })
+        .in("review_status", ["kept", "deleted"]),
+    ]);
+
+    res.json({ prop: data, total, reviewed });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/review/action", async (req, res) => {
+  const { name, action } = req.body;
+  if (!name || !action) return res.status(400).json({ error: "name and action required" });
+
+  // Map action to DB status
+  const statusMap = { keep: "kept", delete: "deleted", skip: "skipped", no_image: "no_image" };
+  const status = statusMap[action];
+  if (!status) return res.status(400).json({ error: "invalid action" });
+
+  try {
+    // Update DB first so the next /review/next query never returns this prop again.
+    // For delete, R2 removal runs in the background after we respond so the client
+    // isn't blocked waiting for two Cloudflare round-trips.
+    const { error } = await supabase
+      .from("props")
+      .update({ review_status: status })
+      .eq("name", name);
+    if (error) throw new Error(error.message);
+
+    if (action === "delete") {
+      Promise.allSettled([
+        deleteFromR2(`${name}_overview.png`),
+        deleteFromR2(`${name}_player.png`),
+      ]).catch(console.error);
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/review/stats", async (req, res) => {
+  try {
+    const [{ count: total }, { count: kept }, { count: deleted }, { count: skipped }] = await Promise.all([
+      supabase.from("props").select("*", { count: "exact", head: true }),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "kept"),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "deleted"),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "skipped"),
+    ]);
+    res.json({ total, kept, deleted, skipped });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -7,6 +7,9 @@ export default defineConfig({
     proxy: {
       "/search": "http://localhost:3001",
       "/best-match": "http://localhost:3001",
+      "/review/next":   "http://localhost:3001",
+      "/review/action": "http://localhost:3001",
+      "/review/stats":  "http://localhost:3001",
     },
   },
 });
