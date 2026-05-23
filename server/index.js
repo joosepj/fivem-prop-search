@@ -91,45 +91,54 @@ app.get("/best-match", async (req, res) => {
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 256,
+      max_tokens: 512,
       tools: [
         {
-          name: "pick_best_prop",
-          description: "Pick the single best matching GTA V prop from the candidate list",
+          name: "pick_top_props",
+          description: "Pick the top 3 best matching GTA V props from the candidate list, ranked best to worst",
           input_schema: {
             type: "object",
             properties: {
-              name: {
-                type: "string",
-                description: "The exact prop name from the candidate list",
-              },
-              reason: {
-                type: "string",
-                description:
-                  "One sentence explaining why this prop best matches the user's description",
+              picks: {
+                type: "array",
+                minItems: 3,
+                maxItems: 3,
+                items: {
+                  type: "object",
+                  properties: {
+                    name: {
+                      type: "string",
+                      description: "The exact prop name from the candidate list",
+                    },
+                    reason: {
+                      type: "string",
+                      description: "One sentence explaining why this prop matches the user's description",
+                    },
+                  },
+                  required: ["name", "reason"],
+                },
               },
             },
-            required: ["name", "reason"],
+            required: ["picks"],
           },
         },
       ],
-      tool_choice: { type: "tool", name: "pick_best_prop" },
+      tool_choice: { type: "tool", name: "pick_top_props" },
       messages: [
         {
           role: "user",
-          content: `A FiveM/GTA V developer is looking for a prop. Their description: "${query}"\n\nVector search returned these candidates:\n${propList}\n\nPick the single best prop from this list.`,
+          content: `A FiveM/GTA V developer is looking for a prop. Their description: "${query}"\n\nVector search returned these candidates:\n${propList}\n\nPick the top 3 best props from this list, ranked from best to worst match.`,
         },
       ],
     });
 
     const toolUse = message.content.find((b) => b.type === "tool_use");
-    const { name, reason } = toolUse.input;
-    const match = candidates.find((c) => c.name === name) ?? candidates[0];
-
-    res.json({
-      best: { name: match.name, reason, similarity: match.similarity },
-      results: candidates,
+    const top = toolUse.input.picks.map((pick) => {
+      const match = candidates.find((c) => c.name === pick.name) ?? candidates[0];
+      return { name: match.name, reason: pick.reason, similarity: match.similarity };
     });
+
+    res.json({ top, results: candidates });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

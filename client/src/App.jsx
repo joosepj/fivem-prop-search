@@ -1,8 +1,11 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
 const DEBOUNCE_MS = 400;
 const API = import.meta.env.VITE_API_URL ?? "";
 const R2  = "https://pub-c1d30e6aba3a4fca841cd417ecbe67e0.r2.dev";
+
+const rankLabels = ["1st", "2nd", "3rd"];
+const rankColors = ["#f6ad55", "#a0aec0", "#c8855a"];
 
 function getPrefix(name) {
   const m = name.match(/^([a-z]+_)/i);
@@ -21,6 +24,26 @@ function joaatHash(key) {
   hash ^= hash >>> 11;
   hash += hash << 15;
   return "0x" + (hash >>> 0).toString(16).toUpperCase().padStart(8, "0");
+}
+
+function Lightbox({ src, onClose }) {
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div style={lightboxStyles.backdrop} onClick={onClose}>
+      <button style={lightboxStyles.close} onClick={onClose} aria-label="Close">×</button>
+      <img
+        src={src}
+        alt=""
+        style={lightboxStyles.img}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
 }
 
 function CopyButton({ text, label = "Copy", onCopy }) {
@@ -53,43 +76,53 @@ function StarButton({ name, favorites, onToggle }) {
 }
 
 function PropImage({ name }) {
-  const [view, setView]     = useState("overview");
-  const [status, setStatus] = useState("loading"); // "loading" | "loaded" | "error"
+  const [view, setView]         = useState("overview");
+  const [status, setStatus]     = useState("loading"); // "loading" | "loaded" | "error"
+  const [lightbox, setLightbox] = useState(false);
 
   const src = `${R2}/${name}_${view}.png`;
 
   // Reset on prop change
-  useEffect(() => { setView("overview"); setStatus("loading"); }, [name]);
+  useEffect(() => { setView("overview"); setStatus("loading"); setLightbox(false); }, [name]);
 
-  function toggle() {
+  const closeLightbox = useCallback(() => setLightbox(false), []);
+
+  function toggle(e) {
+    e.stopPropagation();
     setView((v) => (v === "overview" ? "player" : "overview"));
     setStatus("loading");
   }
 
-  // Overview failed/timed-out → hide the entire image section, no broken icon
+  // Overview failed → hide the entire image section, no broken icon
   if (status === "error" && view === "overview") return null;
 
   return (
-    <div style={imgStyles.wrapper}>
-      {/* opacity instead of display:none so the browser actually fetches the image */}
-      <img
-        key={src}
-        src={src}
-        alt=""
-        style={{ ...imgStyles.img, opacity: status === "loaded" ? 1 : 0 }}
-        onLoad={() => setStatus("loaded")}
-        onError={() => setStatus("error")}
-      />
-      {status === "loading" && <div style={imgStyles.skeleton} />}
-      {status === "error" && view === "player" && (
-        <div style={imgStyles.noPlayer}>No player view available</div>
-      )}
-      {(status === "loaded" || (status === "error" && view === "player")) && (
-        <button style={imgStyles.toggle} onClick={toggle}>
-          {view === "overview" ? "Player view" : "Overview"}
-        </button>
-      )}
-    </div>
+    <>
+      <div
+        style={{ ...imgStyles.wrapper, cursor: status === "loaded" ? "zoom-in" : "default" }}
+        onClick={() => status === "loaded" && setLightbox(true)}
+      >
+        {/* opacity instead of display:none so the browser actually fetches the image */}
+        <img
+          key={src}
+          src={src}
+          alt=""
+          style={{ ...imgStyles.img, opacity: status === "loaded" ? 1 : 0 }}
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+        />
+        {status === "loading" && <div style={imgStyles.skeleton} />}
+        {status === "error" && view === "player" && (
+          <div style={imgStyles.noPlayer}>No player view available</div>
+        )}
+        {(status === "loaded" || (status === "error" && view === "player")) && (
+          <button style={imgStyles.toggle} onClick={toggle}>
+            {view === "overview" ? "Player view" : "Overview"}
+          </button>
+        )}
+      </div>
+      {lightbox && <Lightbox src={src} onClose={closeLightbox} />}
+    </>
   );
 }
 
@@ -202,7 +235,7 @@ export default function App() {
   const [activeFilter, setActiveFilter] = useState(null);
 
   const [describeQuery, setDescribeQuery] = useState("");
-  const [best, setBest] = useState(null);
+  const [top, setTop] = useState([]);
   const [describeLoading, setDescribeLoading] = useState(false);
   const [describeError, setDescribeError] = useState(null);
   const [describeFocused, setDescribeFocused] = useState(false);
@@ -286,12 +319,12 @@ export default function App() {
     if (!describeQuery.trim() || describeLoading) return;
     setDescribeLoading(true);
     setDescribeError(null);
-    setBest(null);
+    setTop([]);
     try {
       const res = await fetch(`${API}/best-match?q=${encodeURIComponent(describeQuery)}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setBest(data.best);
+      setTop(data.top ?? []);
     } catch (e) {
       setDescribeError(e.message);
     } finally {
@@ -389,30 +422,37 @@ export default function App() {
           </div>
 
           <div style={styles.results}>
-            {best && (
-              <div style={styles.bestCard}>
-                <div style={styles.bestHeader}>
-                  <span style={styles.bestLabel}>✦ Best Match</span>
+            {top.length > 0 && (
+              <div style={styles.topSection}>
+                <div style={styles.topSectionHeader}>
+                  <span style={styles.bestLabel}>✦ AI Best Matches</span>
                 </div>
-                <div style={styles.bestNameRow}>
-                  <div>
-                    <div style={styles.bestName}>{best.name}</div>
-                    <div style={styles.hash}>{joaatHash(best.name)}</div>
+                {top.map((match, i) => (
+                  <div key={match.name} style={{ ...styles.bestCard, borderTopColor: rankColors[i], borderTopWidth: "2px" }}>
+                    <div style={styles.bestNameRow}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+                        <span style={{ ...styles.rankBadge, color: rankColors[i] }}>{rankLabels[i]}</span>
+                        <div>
+                          <div style={styles.bestName}>{match.name}</div>
+                          <div style={styles.hash}>{joaatHash(match.name)}</div>
+                        </div>
+                      </div>
+                      <div style={styles.itemRight}>
+                        <StarButton name={match.name} favorites={favorites} onToggle={toggleFavorite} />
+                        <CopyButton text={match.name} label="Copy" onCopy={() => trackCopy(match.name)} />
+                        <CopyButton text={joaatHash(match.name)} label="Copy Hash" onCopy={() => trackCopy(match.name)} />
+                      </div>
+                    </div>
+                    <PropImage name={match.name} />
+                    <div style={styles.bestReason}>{match.reason}</div>
                   </div>
-                  <div style={styles.itemRight}>
-                    <StarButton name={best.name} favorites={favorites} onToggle={toggleFavorite} />
-                    <CopyButton text={best.name} label="Copy" onCopy={() => trackCopy(best.name)} />
-                    <CopyButton text={joaatHash(best.name)} label="Copy Hash" onCopy={() => trackCopy(best.name)} />
-                  </div>
-                </div>
-                <PropImage name={best.name} />
-                <div style={styles.bestReason}>{best.reason}</div>
+                ))}
               </div>
             )}
 
-            {describeLoading && <p style={styles.status}>Finding best match…</p>}
+            {describeLoading && <p style={styles.status}>Finding best matches…</p>}
             {describeError && <p style={{ ...styles.status, color: "#fc8181" }}>{describeError}</p>}
-            {!describeLoading && !describeError && describeQuery.trim() && !best && (
+            {!describeLoading && !describeError && describeQuery.trim() && top.length === 0 && (
               <p style={styles.status}>No result.</p>
             )}
 
@@ -540,9 +580,11 @@ const styles = {
     fontSize: "0.75rem", fontWeight: 600, padding: "2px 10px", borderRadius: "6px",
     border: "1px solid #4a5568", background: "transparent", color: "#a0aec0", cursor: "pointer",
   },
+  topSection: { display: "flex", flexDirection: "column", gap: "8px" },
+  topSectionHeader: { marginBottom: "2px" },
   bestCard: { background: "#141c2e", border: "1px solid #4a6fa5", borderRadius: "12px", padding: "18px 20px" },
-  bestHeader: { marginBottom: "10px" },
   bestLabel: { fontSize: "0.75rem", fontWeight: 700, color: "#90cdf4", textTransform: "uppercase", letterSpacing: "0.08em" },
+  rankBadge: { fontSize: "0.7rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0 },
   bestNameRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "8px", gap: "8px" },
   bestName: { fontFamily: "monospace", fontSize: "1.1rem", color: "#e2e8f0" },
   bestReason: { fontSize: "0.875rem", color: "#a0aec0", lineHeight: 1.5, marginTop: "10px" },
@@ -592,6 +634,47 @@ const styles = {
     cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0 2px", flexShrink: 0,
   },
   sidebarMore: { fontSize: "0.7rem", color: "#4a5568", textAlign: "center" },
+};
+
+const lightboxStyles = {
+  backdrop: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 1000,
+    background: "rgba(0, 0, 0, 0.85)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backdropFilter: "blur(4px)",
+    cursor: "zoom-out",
+  },
+  img: {
+    maxWidth: "90vw",
+    maxHeight: "90vh",
+    objectFit: "contain",
+    borderRadius: "8px",
+    boxShadow: "0 8px 48px rgba(0, 0, 0, 0.7)",
+    cursor: "default",
+  },
+  close: {
+    position: "fixed",
+    top: "20px",
+    right: "24px",
+    background: "rgba(26, 29, 39, 0.9)",
+    border: "1px solid #4a5568",
+    borderRadius: "50%",
+    color: "#a0aec0",
+    fontSize: "1.4rem",
+    lineHeight: 1,
+    width: "36px",
+    height: "36px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    zIndex: 1001,
+    backdropFilter: "blur(4px)",
+  },
 };
 
 const imgStyles = {
