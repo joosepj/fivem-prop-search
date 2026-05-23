@@ -153,6 +153,16 @@ const R2_BUCKET = process.env.R2_BUCKET || "gta-prop-images";
 const R2_KEY    = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET = process.env.R2_SECRET_ACCESS_KEY;
 
+if (!process.env.R2_ACCOUNT_ID || !R2_KEY || !R2_SECRET) {
+  console.error("[R2] Missing credentials — R2_ACCOUNT_ID: %s, R2_ACCESS_KEY_ID: %s, R2_SECRET_ACCESS_KEY: %s",
+    process.env.R2_ACCOUNT_ID ? "set" : "MISSING",
+    R2_KEY ? "set" : "MISSING",
+    R2_SECRET ? "set" : "MISSING"
+  );
+} else {
+  console.log("[R2] Credentials loaded — account: %s, bucket: %s", process.env.R2_ACCOUNT_ID, R2_BUCKET);
+}
+
 function sha256Hex(data) {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
@@ -187,11 +197,12 @@ function deleteFromR2(objectKey) {
       method  : "DELETE",
       headers : { "x-amz-content-sha256": emptyHash, "x-amz-date": amzDate, Authorization: auth, Host: R2_HOST },
     }, (res) => {
-      res.resume();
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
       res.on("end", () => {
         // 204 = deleted, 404 = already gone — both are fine
         if (res.statusCode < 300 || res.statusCode === 404) resolve();
-        else reject(new Error(`R2 DELETE ${objectKey}: HTTP ${res.statusCode}`));
+        else reject(new Error(`R2 DELETE ${objectKey}: HTTP ${res.statusCode} — ${body.slice(0, 400)}`));
       });
     });
     req.on("error", reject);
@@ -248,10 +259,13 @@ app.post("/review/action", async (req, res) => {
     if (error) throw new Error(error.message);
 
     if (action === "delete") {
-      Promise.allSettled([
-        deleteFromR2(`${name}_overview.png`),
-        deleteFromR2(`${name}_player.png`),
-      ]).catch(console.error);
+      const keys = [`${name}_overview.png`, `${name}_player.png`];
+      Promise.allSettled(keys.map(deleteFromR2)).then((results) => {
+        results.forEach((r, i) => {
+          if (r.status === "rejected") console.error(`[R2 delete] FAILED ${keys[i]}: ${r.reason}`);
+          else console.log(`[R2 delete] OK ${keys[i]}`);
+        });
+      });
     }
 
     res.json({ ok: true });
