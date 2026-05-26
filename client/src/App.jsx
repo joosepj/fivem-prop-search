@@ -10,7 +10,9 @@ function logEvent(type, query, resultCount = 0) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, type, result_count: resultCount }),
-  }).catch(() => {});
+  }).then((r) => {
+    if (!r.ok) r.text().then((t) => console.warn("[log] failed:", r.status, t));
+  }).catch((e) => console.warn("[log] network error:", e.message));
 }
 
 const rankLabels = ["1st", "2nd", "3rd"];
