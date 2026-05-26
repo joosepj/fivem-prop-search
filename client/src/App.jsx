@@ -250,12 +250,25 @@ export default function App() {
     catch { return []; }
   });
 
+  const [recentSearches, setRecentSearches] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("prop-recent-searches") || "[]"); }
+    catch { return []; }
+  });
+
   const searchDebounce = useRef(null);
 
   function trackCopy(name) {
     setRecentlyCopied((prev) => {
       const next = [name, ...prev.filter((n) => n !== name)].slice(0, 10);
       localStorage.setItem("prop-recently-copied", JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function trackSearch(query) {
+    setRecentSearches((prev) => {
+      const next = [query, ...prev.filter((q) => q !== query)].slice(0, 8);
+      localStorage.setItem("prop-recent-searches", JSON.stringify(next));
       return next;
     });
   }
@@ -305,6 +318,7 @@ export default function App() {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         setSearchResults(data.results);
+        if (data.results.length > 0) trackSearch(searchQuery.trim());
       } catch (e) {
         setSearchError(e.message);
         setSearchResults([]);
@@ -382,9 +396,21 @@ export default function App() {
                 type="text"
                 placeholder="e.g. wooden crate, traffic cone, park bench…"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setTop([]); }}
                 autoFocus
               />
+              {recentSearches.length > 0 && (
+                <div style={styles.recentSearches}>
+                  <span style={styles.recentSearchesLabel}>Recent:</span>
+                  <div style={styles.recentChips}>
+                    {recentSearches.map((q) => (
+                      <button key={q} style={styles.recentChip} onClick={() => setSearchQuery(q)}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={styles.divider}>
@@ -634,6 +660,19 @@ const styles = {
     cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0 2px", flexShrink: 0,
   },
   sidebarMore: { fontSize: "0.7rem", color: "#4a5568", textAlign: "center" },
+  recentSearches: { display: "flex", alignItems: "flex-start", gap: "8px", flexWrap: "wrap" },
+  recentSearchesLabel: {
+    fontSize: "0.65rem", fontWeight: 700, color: "#4a5568",
+    textTransform: "uppercase", letterSpacing: "0.08em",
+    flexShrink: 0, paddingTop: "4px",
+  },
+  recentChips: { display: "flex", flexWrap: "wrap", gap: "5px" },
+  recentChip: {
+    fontSize: "0.75rem", fontWeight: 500, fontFamily: "monospace",
+    padding: "3px 10px", borderRadius: "999px",
+    border: "1px solid #2d3748", background: "transparent",
+    color: "#718096", cursor: "pointer",
+  },
 };
 
 const lightboxStyles = {
