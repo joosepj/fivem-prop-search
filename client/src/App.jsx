@@ -318,7 +318,7 @@ export default function App() {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         setSearchResults(data.results);
-        if (data.results.length > 0) trackSearch(searchQuery.trim());
+        if (data.results.length > 0 && searchQuery.trim().length >= 3) trackSearch(searchQuery.trim());
       } catch (e) {
         setSearchError(e.message);
         setSearchResults([]);
