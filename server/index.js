@@ -146,6 +146,68 @@ app.get("/best-match", async (req, res) => {
   }
 });
 
+// ── Search logging ────────────────────────────────────────────────────────────
+
+app.post("/log", (req, res) => {
+  const { query, type, result_count } = req.body;
+  if (!query || !type) return res.status(400).json({ error: "query and type required" });
+  const validTypes = ["search", "ai_best_match", "copy"];
+  if (!validTypes.includes(type)) return res.status(400).json({ error: "invalid type" });
+
+  res.json({ ok: true });
+
+  supabase
+    .from("searches_log")
+    .insert({ query, type, result_count: result_count ?? 0 })
+    .then(({ error }) => {
+      if (error) console.error("[log] DB error:", error.message);
+    });
+});
+
+// ── Admin stats ───────────────────────────────────────────────────────────────
+
+app.get("/admin/stats", async (req, res) => {
+  if (req.headers["x-admin-password"] !== "doggystyle2024") {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const [
+      { count: total },
+      { count: kept },
+      { count: deleted },
+      { count: skipped },
+      { count: no_image },
+      { count: unreviewed },
+      topSearches,
+      topCopies,
+      dailySearches,
+      typeCounts,
+    ] = await Promise.all([
+      supabase.from("props").select("*", { count: "exact", head: true }),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "kept"),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "deleted"),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "skipped"),
+      supabase.from("props").select("*", { count: "exact", head: true }).eq("review_status", "no_image"),
+      supabase.from("props").select("*", { count: "exact", head: true }).is("review_status", null),
+      supabase.rpc("admin_top_searches"),
+      supabase.rpc("admin_top_copies"),
+      supabase.rpc("admin_daily_searches"),
+      supabase.rpc("admin_type_counts"),
+    ]);
+
+    res.json({
+      review: { total, kept, deleted, skipped, no_image: no_image ?? 0, unreviewed },
+      topSearches: topSearches.data ?? [],
+      topCopies: topCopies.data ?? [],
+      dailySearches: dailySearches.data ?? [],
+      typeCounts: typeCounts.data ?? [],
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── R2 helpers ────────────────────────────────────────────────────────────────
 
 const R2_HOST   = `${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;

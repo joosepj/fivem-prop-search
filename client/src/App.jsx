@@ -4,6 +4,15 @@ const DEBOUNCE_MS = 400;
 const API = import.meta.env.VITE_API_URL ?? "";
 const R2  = "https://pub-c1d30e6aba3a4fca841cd417ecbe67e0.r2.dev";
 
+function logEvent(type, query, resultCount = 0) {
+  if (!query || query.length < 1) return;
+  fetch(`${API}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, type, result_count: resultCount }),
+  }).catch(() => {});
+}
+
 const rankLabels = ["1st", "2nd", "3rd"];
 const rankColors = ["#f6ad55", "#a0aec0", "#c8855a"];
 
@@ -263,6 +272,7 @@ export default function App() {
       localStorage.setItem("prop-recently-copied", JSON.stringify(next));
       return next;
     });
+    logEvent("copy", name, 0);
   }
 
   function trackSearch(query) {
@@ -319,6 +329,7 @@ export default function App() {
         if (data.error) throw new Error(data.error);
         setSearchResults(data.results);
         if (data.results.length > 0 && searchQuery.trim().length >= 3) trackSearch(searchQuery.trim());
+        if (searchQuery.trim().length >= 3) logEvent("search", searchQuery.trim(), data.results.length);
       } catch (e) {
         setSearchError(e.message);
         setSearchResults([]);
@@ -339,6 +350,7 @@ export default function App() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setTop(data.top ?? []);
+      logEvent("ai_best_match", describeQuery.trim(), data.top?.length ?? 0);
     } catch (e) {
       setDescribeError(e.message);
     } finally {

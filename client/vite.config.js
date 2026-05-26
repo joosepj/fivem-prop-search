@@ -5,8 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/search": "http://localhost:3001",
-      "/best-match": "http://localhost:3001",
+      "/search":        "http://localhost:3001",
+      "/best-match":    "http://localhost:3001",
+      "/log":           "http://localhost:3001",
+      "/admin/stats":   "http://localhost:3001",
       "/review/next":   "http://localhost:3001",
       "/review/action": "http://localhost:3001",
       "/review/stats":  "http://localhost:3001",
