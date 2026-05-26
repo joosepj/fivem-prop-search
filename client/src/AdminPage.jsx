@@ -1,7 +1,218 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const API = import.meta.env.VITE_API_URL ?? "";
+const R2  = "https://pub-c1d30e6aba3a4fca841cd417ecbe67e0.r2.dev";
 const ADMIN_PASSWORD = "doggystyle2024";
+
+function joaatHash(key) {
+  key = key.toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash += key.charCodeAt(i);
+    hash += hash << 10;
+    hash ^= hash >>> 6;
+  }
+  hash += hash << 3;
+  hash ^= hash >>> 11;
+  hash += hash << 15;
+  return "0x" + (hash >>> 0).toString(16).toUpperCase().padStart(8, "0");
+}
+
+// ── Review components ─────────────────────────────────────────────────────────
+
+function ReviewImagePanel({ src, label }) {
+  const [status, setStatus] = useState("loading");
+  useEffect(() => { setStatus("loading"); }, [src]);
+  return (
+    <div style={rv.imgPanel}>
+      <div style={rv.imgLabel}>{label}</div>
+      <div style={rv.imgBox}>
+        <img
+          key={src}
+          src={src}
+          alt={label}
+          style={{ ...rv.img, opacity: status === "loaded" ? 1 : 0 }}
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+        />
+        {status === "loading" && <div style={rv.imgSkeleton} />}
+        {status === "error" && <div style={rv.imgNoImg}>No image</div>}
+      </div>
+    </div>
+  );
+}
+
+function ReviewSection({ isActive }) {
+  const [prop, setProp]               = useState(null);
+  const [loading, setLoading]         = useState(false);
+  const [done, setDone]               = useState(false);
+  const [skippedPhase, setSkippedPhase] = useState(false);
+  const [total, setTotal]             = useState(null);
+  const [reviewed, setReviewed]       = useState(null);
+  const [sessionStats, setSessionStats] = useState({ kept: 0, deleted: 0, skipped: 0 });
+  const [feedback, setFeedback]       = useState(null);
+
+  const actionLock   = useRef(false);
+  const feedbackTimer = useRef(null);
+
+  const fetchNext = useCallback(async (useSkipped = false) => {
+    setLoading(true);
+    setProp(null);
+    try {
+      const r1 = await fetch(`${API}/review/next${useSkipped ? "?skipped=1" : ""}`);
+      const d1 = await r1.json();
+      if (d1.done) {
+        if (!useSkipped) {
+          const r2 = await fetch(`${API}/review/next?skipped=1`);
+          const d2 = await r2.json();
+          if (d2.done) { setDone(true); }
+          else { setSkippedPhase(true); setProp(d2.prop); setTotal(d2.total); setReviewed(d2.reviewed); }
+        } else {
+          setDone(true);
+        }
+      } else {
+        setProp(d1.prop); setTotal(d1.total); setReviewed(d1.reviewed);
+      }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); actionLock.current = false; }
+  }, []);
+
+  const doAction = useCallback(async (action) => {
+    if (!prop || actionLock.current || loading) return;
+    actionLock.current = true;
+
+    const cfg = {
+      keep:   { label: "Kept ✓",    color: "#68d391" },
+      delete: { label: "Deleted ✗", color: "#fc8181" },
+      skip:   { label: "Skipped →", color: "#f6ad55" },
+    };
+    clearTimeout(feedbackTimer.current);
+    setFeedback(cfg[action]);
+    feedbackTimer.current = setTimeout(() => setFeedback(null), 700);
+
+    const key = action === "keep" ? "kept" : action === "delete" ? "deleted" : "skipped";
+    setSessionStats(prev => ({ ...prev, [key]: prev[key] + 1 }));
+
+    try {
+      await fetch(`${API}/review/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: prop.name, action }),
+      });
+    } catch (e) { console.error(e); }
+
+    await fetchNext(skippedPhase);
+  }, [prop, loading, skippedPhase, fetchNext]);
+
+  // Load first prop on mount
+  useEffect(() => { fetchNext(false); }, [fetchNext]);
+
+  // Keyboard shortcuts — only when this tab is active
+  useEffect(() => {
+    if (!isActive || done) return;
+    function onKey(e) {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if      (e.key === "k" || e.key === "K") doAction("keep");
+      else if (e.key === "d" || e.key === "D") doAction("delete");
+      else if (e.key === "s" || e.key === "S") doAction("skip");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isActive, done, doAction]);
+
+  if (done) {
+    return (
+      <div style={rv.doneBox}>
+        <div style={rv.doneTitle}>All caught up!</div>
+        <div style={rv.doneStats}>
+          <span style={{ color: "#68d391" }}>K {sessionStats.kept}</span>
+          <span style={{ color: "#fc8181" }}>D {sessionStats.deleted}</span>
+          <span style={{ color: "#f6ad55" }}>S {sessionStats.skipped}</span>
+        </div>
+        <div style={rv.doneActions}>
+          {sessionStats.skipped > 0 && (
+            <button style={rv.doneBtn} onClick={() => { setDone(false); setSkippedPhase(true); fetchNext(true); }}>
+              Review skipped ({sessionStats.skipped})
+            </button>
+          )}
+          <button style={{ ...rv.doneBtn, ...rv.doneBtnSecondary }} onClick={() => {
+            setSessionStats({ kept: 0, deleted: 0, skipped: 0 });
+            setDone(false); setSkippedPhase(false); fetchNext(false);
+          }}>
+            Start over
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const pct = total > 0 ? Math.min(100, (reviewed / total) * 100) : 0;
+
+  return (
+    <div>
+      <style>{`
+        @keyframes rv-shimmer {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        @keyframes rv-fade {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
+      {/* Progress row */}
+      <div style={rv.progressRow}>
+        <div style={rv.progressTrack}>
+          <div style={{ ...rv.progressFill, width: `${pct}%` }} />
+        </div>
+        {reviewed !== null && (
+          <span style={rv.progressText}>
+            {reviewed.toLocaleString()} / {total?.toLocaleString()} reviewed
+          </span>
+        )}
+        {skippedPhase && <span style={rv.phaseTag}>Reviewing skipped</span>}
+        <div style={rv.badges}>
+          <span style={{ ...rv.badge, color: "#68d391", borderColor: "#1c4532" }}>K {sessionStats.kept}</span>
+          <span style={{ ...rv.badge, color: "#fc8181", borderColor: "#4a1a1a" }}>D {sessionStats.deleted}</span>
+          <span style={{ ...rv.badge, color: "#f6ad55", borderColor: "#4a3000" }}>S {sessionStats.skipped}</span>
+        </div>
+      </div>
+
+      {/* Prop card */}
+      {loading && !prop ? (
+        <div style={rv.loadingMsg}>Loading…</div>
+      ) : prop ? (
+        <div style={rv.card} key={prop.name}>
+          <div style={rv.images}>
+            <ReviewImagePanel src={`${R2}/${prop.name}_overview.png`} label="Overview" />
+            <ReviewImagePanel src={`${R2}/${prop.name}_player.png`}   label="Player view" />
+          </div>
+          <div style={rv.propInfo}>
+            <span style={rv.propName}>{prop.name}</span>
+            <span style={rv.propHash}>{joaatHash(prop.name)}</span>
+          </div>
+          <div style={rv.actions}>
+            <button style={{ ...rv.actionBtn, ...rv.keepBtn }}   onClick={() => doAction("keep")}>
+              <kbd style={rv.kbd}>K</kbd> Keep
+            </button>
+            <button style={{ ...rv.actionBtn, ...rv.deleteBtn }} onClick={() => doAction("delete")}>
+              <kbd style={rv.kbd}>D</kbd> Delete
+            </button>
+            <button style={{ ...rv.actionBtn, ...rv.skipBtn }}   onClick={() => doAction("skip")}>
+              <kbd style={rv.kbd}>S</kbd> Skip
+            </button>
+          </div>
+          {feedback && (
+            <div style={{ ...rv.feedback, background: feedback.color + "18", borderColor: feedback.color + "55", color: feedback.color }}>
+              {feedback.label}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 // ── Auth gate ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +326,7 @@ function BarChart({ data }) {
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(() => sessionStorage.getItem("admin-auth") === "1");
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -156,9 +368,11 @@ export default function AdminPage() {
             <p style={s.subtitle}>FiveM Prop Search</p>
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <button style={s.refreshBtn} onClick={loadStats} disabled={loading}>
-              {loading ? "…" : "↻ Refresh"}
-            </button>
+            {activeTab === "dashboard" && (
+              <button style={s.refreshBtn} onClick={loadStats} disabled={loading}>
+                {loading ? "…" : "↻ Refresh"}
+              </button>
+            )}
             <button
               style={s.logoutBtn}
               onClick={() => { sessionStorage.removeItem("admin-auth"); setAuthed(false); }}
@@ -168,13 +382,31 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {error && <p style={s.errorMsg}>{error}</p>}
+        {/* Tabs */}
+        <div style={s.tabs}>
+          <button
+            style={{ ...s.tab, ...(activeTab === "dashboard" ? s.tabActive : {}) }}
+            onClick={() => setActiveTab("dashboard")}
+          >
+            Dashboard
+          </button>
+          <button
+            style={{ ...s.tab, ...(activeTab === "review" ? s.tabActive : {}) }}
+            onClick={() => setActiveTab("review")}
+          >
+            Review Props
+          </button>
+        </div>
 
-        {loading && !stats && (
+        {activeTab === "review" && <ReviewSection isActive={activeTab === "review"} />}
+
+        {activeTab === "dashboard" && error && <p style={s.errorMsg}>{error}</p>}
+
+        {activeTab === "dashboard" && loading && !stats && (
           <p style={s.loadingMsg}>Loading…</p>
         )}
 
-        {stats && (() => {
+        {activeTab === "dashboard" && stats && (() => {
           const { review, topSearches, topCopies, dailySearches, typeCounts } = stats;
 
           // Fill last 7 days for chart
@@ -508,4 +740,225 @@ const s = {
     color: "#e9d5ff",
     cursor: "pointer",
   },
+
+  // Tabs
+  tabs: {
+    display: "flex",
+    gap: "2px",
+    marginBottom: "28px",
+    borderBottom: "1px solid #2d3748",
+  },
+  tab: {
+    padding: "8px 18px",
+    fontSize: "0.82rem",
+    fontWeight: 600,
+    background: "transparent",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    color: "#4a5568",
+    cursor: "pointer",
+    marginBottom: "-1px",
+    transition: "color 0.15s, border-color 0.15s",
+  },
+  tabActive: {
+    color: "#e2e8f0",
+    borderBottomColor: "#7c3aed",
+  },
+};
+
+// ── Review section styles ─────────────────────────────────────────────────────
+
+const rv = {
+  progressRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "16px",
+    flexWrap: "wrap",
+  },
+  progressTrack: {
+    flex: 1,
+    minWidth: "80px",
+    height: "4px",
+    background: "#2d3748",
+    borderRadius: "999px",
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    background: "linear-gradient(90deg, #4a6fa5, #68d391)",
+    borderRadius: "999px",
+    transition: "width 0.4s ease",
+  },
+  progressText: {
+    fontSize: "0.78rem",
+    color: "#718096",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  phaseTag: {
+    fontSize: "0.68rem",
+    fontWeight: 700,
+    color: "#f6ad55",
+    background: "#3d2e0a",
+    padding: "2px 8px",
+    borderRadius: "999px",
+    flexShrink: 0,
+  },
+  badges: { display: "flex", gap: "6px", flexShrink: 0 },
+  badge: {
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    padding: "3px 9px",
+    borderRadius: "999px",
+    border: "1px solid",
+    background: "transparent",
+    fontFamily: "monospace",
+  },
+  card: {
+    position: "relative",
+    background: "#1a1d27",
+    border: "1px solid #2d3748",
+    borderRadius: "12px",
+    overflow: "hidden",
+    animation: "rv-fade 0.18s ease",
+  },
+  images: {
+    display: "flex",
+    borderBottom: "1px solid #2d3748",
+  },
+  imgPanel: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    borderRight: "1px solid #2d3748",
+  },
+  imgLabel: {
+    fontSize: "0.62rem",
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: "0.1em",
+    color: "#4a5568",
+    padding: "6px 14px 5px",
+    borderBottom: "1px solid #2d3748",
+  },
+  imgBox: {
+    position: "relative",
+    height: "280px",
+    background: "#0d1117",
+    overflow: "hidden",
+  },
+  img: {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+    transition: "opacity 0.15s",
+  },
+  imgSkeleton: {
+    position: "absolute",
+    inset: 0,
+    background: "linear-gradient(90deg, #1a1d27 25%, #22263a 50%, #1a1d27 75%)",
+    backgroundSize: "200% 100%",
+    animation: "rv-shimmer 1.4s ease-in-out infinite",
+  },
+  imgNoImg: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#4a5568",
+    fontSize: "0.82rem",
+  },
+  propInfo: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: "12px",
+    padding: "12px 18px",
+    borderBottom: "1px solid #2d3748",
+  },
+  propName: {
+    fontFamily: "monospace",
+    fontSize: "0.95rem",
+    color: "#90cdf4",
+    wordBreak: "break-all",
+  },
+  propHash: {
+    fontFamily: "monospace",
+    fontSize: "0.75rem",
+    color: "#4a5568",
+    flexShrink: 0,
+  },
+  actions: {
+    display: "flex",
+    gap: "10px",
+    padding: "14px 18px",
+  },
+  actionBtn: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    padding: "11px 0",
+    fontSize: "0.88rem",
+    fontWeight: 700,
+    border: "1px solid",
+    borderRadius: "10px",
+    cursor: "pointer",
+    letterSpacing: "0.02em",
+  },
+  keepBtn:   { background: "#0d2b1d", borderColor: "#1c5132", color: "#68d391" },
+  deleteBtn: { background: "#2d0f0f", borderColor: "#5c2020", color: "#fc8181" },
+  skipBtn:   { background: "#2d2000", borderColor: "#5c4000", color: "#f6ad55" },
+  kbd: {
+    fontFamily: "monospace",
+    fontSize: "0.72rem",
+    fontWeight: 800,
+    padding: "1px 5px",
+    background: "rgba(255,255,255,0.08)",
+    borderRadius: "4px",
+    border: "1px solid rgba(255,255,255,0.1)",
+  },
+  feedback: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    fontSize: "1.3rem",
+    fontWeight: 800,
+    padding: "14px 32px",
+    borderRadius: "12px",
+    border: "1px solid",
+    backdropFilter: "blur(8px)",
+    pointerEvents: "none",
+    animation: "rv-fade 0.1s ease",
+    letterSpacing: "0.04em",
+  },
+  loadingMsg: { color: "#4a5568", fontSize: "0.9rem", padding: "40px 0" },
+  doneBox: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "14px",
+    padding: "60px 20px",
+    background: "#1a1d27",
+    border: "1px solid #2d3748",
+    borderRadius: "12px",
+    textAlign: "center",
+  },
+  doneTitle: { fontSize: "1.4rem", fontWeight: 800, color: "#e2e8f0" },
+  doneStats: { display: "flex", gap: "24px", fontFamily: "monospace", fontWeight: 700, fontSize: "1rem" },
+  doneActions: { display: "flex", gap: "10px", marginTop: "8px" },
+  doneBtn: {
+    padding: "9px 20px",
+    fontSize: "0.88rem",
+    fontWeight: 700,
+    background: "#2d3748",
+    border: "1px solid #4a5568",
+    borderRadius: "10px",
+    color: "#e2e8f0",
+    cursor: "pointer",
+  },
+  doneBtnSecondary: { background: "transparent", borderColor: "#2d3748", color: "#718096" },
 };
