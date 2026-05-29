@@ -57,7 +57,7 @@ function Lightbox({ src, onClose }) {
   );
 }
 
-function CopyButton({ text, label = "Copy", onCopy }) {
+function CopyButton({ text, label = "Copy", onCopy, btnStyle }) {
   const [copied, setCopied] = useState(false);
   function handleCopy() {
     navigator.clipboard.writeText(text).then(() => {
@@ -67,7 +67,7 @@ function CopyButton({ text, label = "Copy", onCopy }) {
     });
   }
   return (
-    <button onClick={handleCopy} style={styles.copyBtn}>
+    <button onClick={handleCopy} style={btnStyle ?? styles.copyBtn}>
       {copied ? "Copied!" : label}
     </button>
   );
@@ -142,17 +142,17 @@ function PropItem({ name, favorites, onToggle, onCopy }) {
   return (
     <li style={styles.item}>
       <PropImage name={name} />
-      <div style={styles.itemRow}>
-        <div style={styles.itemLeft}>
+      <div style={styles.itemBody}>
+        <div style={styles.itemTopRow}>
           <StarButton name={name} favorites={favorites} onToggle={onToggle} />
           <div style={styles.itemInfo}>
             <span style={styles.name}>{name}</span>
             <span style={styles.hash}>{hash}</span>
           </div>
         </div>
-        <div style={styles.itemRight}>
-          <CopyButton text={name} label="Copy" onCopy={() => onCopy(name)} />
-          <CopyButton text={hash} label="Copy Hash" onCopy={() => onCopy(name)} />
+        <div style={styles.itemActions}>
+          <CopyButton text={name} label="Copy" onCopy={() => onCopy(name)} btnStyle={styles.copyBtnFull} />
+          <CopyButton text={hash} label="Hash" onCopy={() => onCopy(name)} btnStyle={styles.copyBtnFull} />
         </div>
       </div>
     </li>
@@ -394,6 +394,9 @@ export default function App() {
           0%   { background-position: 200% 0; }
           100% { background-position: -200% 0; }
         }
+        .prop-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        @media (min-width: 480px) { .prop-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 720px) { .prop-grid { grid-template-columns: repeat(4, 1fr); } }
       `}</style>
 
       <div style={styles.layout}>
@@ -517,7 +520,7 @@ export default function App() {
             )}
 
             {filteredResults.length > 0 && (
-              <ul style={styles.list}>
+              <ul className="prop-grid">
                 {filteredResults.map((r) => (
                   <PropItem
                     key={r.id}
@@ -557,7 +560,7 @@ const styles = {
     display: "flex", gap: "24px", maxWidth: "1080px",
     margin: "0 auto", alignItems: "flex-start", padding: "48px 0",
   },
-  main: { flex: 1, minWidth: 0, maxWidth: "720px" },
+  main: { flex: 1, minWidth: 0 },
   title: { fontSize: "2rem", fontWeight: 700, marginBottom: "6px", color: "#f7fafc" },
   subtitle: { fontSize: "0.9rem", color: "#718096", marginBottom: "36px" },
   inputs: { display: "flex", flexDirection: "column", marginBottom: "28px" },
@@ -602,14 +605,15 @@ const styles = {
     background: "#1a1d27", border: "1px solid #2d3748",
     borderRadius: "8px", overflow: "hidden",
   },
-  itemRow: {
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    padding: "12px 16px", gap: "8px",
+  itemBody: { display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px 10px" },
+  itemTopRow: { display: "flex", alignItems: "flex-start", gap: "6px" },
+  itemActions: { display: "flex", gap: "5px" },
+  itemInfo: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 },
+  name: {
+    fontFamily: "monospace", fontSize: "0.8rem", color: "#90cdf4",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
-  itemLeft: { display: "flex", alignItems: "center", gap: "10px", minWidth: 0 },
-  itemInfo: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
-  name: { fontFamily: "monospace", fontSize: "0.95rem", color: "#90cdf4" },
-  hash: { fontFamily: "monospace", fontSize: "0.75rem", color: "#4a5568" },
+  hash: { fontFamily: "monospace", fontSize: "0.7rem", color: "#4a5568" },
   itemRight: { display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 },
   starBtn: {
     background: "transparent", border: "none", fontSize: "1.1rem",
@@ -617,8 +621,13 @@ const styles = {
   },
   starBtnActive: { color: "#f6ad55" },
   copyBtn: {
-    fontSize: "0.75rem", fontWeight: 600, padding: "2px 10px", borderRadius: "6px",
+    fontSize: "0.72rem", fontWeight: 600, padding: "4px 8px", borderRadius: "6px",
     border: "1px solid #4a5568", background: "transparent", color: "#a0aec0", cursor: "pointer",
+  },
+  copyBtnFull: {
+    flex: 1, fontSize: "0.72rem", fontWeight: 600, padding: "4px 6px", borderRadius: "6px",
+    border: "1px solid #4a5568", background: "transparent", color: "#a0aec0", cursor: "pointer",
+    textAlign: "center",
   },
   topSection: { display: "flex", flexDirection: "column", gap: "8px" },
   topSectionHeader: { marginBottom: "2px" },
