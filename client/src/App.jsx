@@ -138,7 +138,7 @@ function PropImage({ name }) {
         )}
         {(status === "loaded" || (status === "error" && view === "player")) && (
           <button style={imgStyles.toggle} onClick={toggle}>
-            {view === "overview" ? "Player view" : "Overview"}
+            {view === "overview" ? "Different angle" : "Overview"}
           </button>
         )}
       </div>
