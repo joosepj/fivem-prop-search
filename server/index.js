@@ -68,6 +68,7 @@ app.get("/search", async (req, res) => {
 
   try {
     const results = await getEmbeddingAndCandidates(query, limit);
+    res.set("Cache-Control", "public, max-age=300, s-maxage=3600");
     res.json({ results });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -140,6 +141,7 @@ app.get("/best-match", async (req, res) => {
       return { name: match.name, reason: pick.reason, similarity: match.similarity };
     });
 
+    res.set("Cache-Control", "private, max-age=300");
     res.json({ top, results: candidates });
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 
 const DEBOUNCE_MS = 400;
+const CACHE_TTL   = 5 * 60 * 1000; // 5 minutes
 const API = import.meta.env.VITE_API_URL ?? "";
 const R2  = "https://pub-c1d30e6aba3a4fca841cd417ecbe67e0.r2.dev";
+
+const searchCache = new Map(); // query -> { results, ts }
 
 function logEvent(type, query, resultCount = 0) {
   if (!query || query.length < 1) return;
@@ -333,15 +336,25 @@ export default function App() {
     if (!searchQuery.trim()) { setSearchResults([]); setSearchError(null); return; }
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(async () => {
+      const q = searchQuery.trim();
+      const cacheKey = q.toLowerCase();
+      const cached = searchCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < CACHE_TTL) {
+        setSearchResults(cached.results);
+        setSearchError(null);
+        if (cached.results.length > 0 && q.length >= 3) trackSearch(q);
+        return;
+      }
       setSearchLoading(true);
       setSearchError(null);
       try {
-        const res = await fetch(`${API}/search?q=${encodeURIComponent(searchQuery)}&limit=30`);
+        const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}&limit=30`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        searchCache.set(cacheKey, { results: data.results, ts: Date.now() });
         setSearchResults(data.results);
-        if (data.results.length > 0 && searchQuery.trim().length >= 3) trackSearch(searchQuery.trim());
-        if (searchQuery.trim().length >= 3) logEvent("search", searchQuery.trim(), data.results.length);
+        if (data.results.length > 0 && q.length >= 3) trackSearch(q);
+        if (q.length >= 3) logEvent("search", q, data.results.length);
       } catch (e) {
         setSearchError(e.message);
         setSearchResults([]);
