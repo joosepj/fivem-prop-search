@@ -104,8 +104,18 @@ function PropImage({ name }) {
     setStatus("loading");
   }
 
-  // Overview failed → hide the entire image section, no broken icon
-  if (status === "error" && view === "overview") return null;
+  if (status === "error" && view === "overview") {
+    return (
+      <div style={imgStyles.placeholder}>
+        <svg style={imgStyles.placeholderIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <circle cx="12" cy="12" r="3.5" />
+          <path d="M8.5 5l1.5-2h4l1.5 2" />
+        </svg>
+        <span style={imgStyles.placeholderText}>No image yet</span>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -746,6 +756,29 @@ const imgStyles = {
     background: "#0d1117",
     overflow: "hidden",
     flexShrink: 0,
+  },
+  placeholder: {
+    height: "160px",
+    background: "#0d1117",
+    border: "1px dashed #2d3748",
+    borderRadius: "0",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    flexShrink: 0,
+  },
+  placeholderIcon: {
+    width: "32px",
+    height: "32px",
+    color: "#2d3748",
+  },
+  placeholderText: {
+    fontSize: "0.72rem",
+    color: "#4a5568",
+    fontWeight: 500,
+    letterSpacing: "0.03em",
   },
   img: {
     width: "100%",
